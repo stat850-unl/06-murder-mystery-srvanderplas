@@ -34,10 +34,7 @@ When you are finished with the assignment:
 
 Your assignment must compile on a different computer as long as the saspath and DSN connection is set up correctly for that machine.
 
-
-You'll need to create a DSN or database connection (the database is an SQLite database) to the data file, which is provided in this repository. 
-
-My `~/.odbc.ini` entry looks like this:
+You can connect to the SQLite database in R or SAS, though in SAS you'll need to have a DSN connection set up. (Mine is below and should be similar to what you'd need on Windows/Mac). 
 
 ````
 [sqlmystery]
@@ -46,9 +43,14 @@ Driver = SQLite3
 Database = /home/susan/Projects/Class/unl-stat850/2020-stat850/data/sql-murder-mystery.db
 ````
 
+Alternately, I have exported the tables as CSVs, and you can access those using the code at these links: [R](https://github.com/srvanderplas/unl-stat850/blob/master/code/06_sql-murder-setup.R), [SAS](https://github.com/srvanderplas/unl-stat850/blob/master/code/06_sql-murder-setup.sas)
+
+You can copy the code from these repositories and include that code as your first code chunk.
+
+
 ***
 
-A crime has taken place and the detective needs your help. The detective gave you the crime scene report, but you somehow lost it. You vaguely remember that the crime was a murdeer that occurred sometime on January 15, 2018 and that it took place in SQL City. All the clues to this mystery are buried in a huge database, and you need to use R and SAS to navigate through this network of information. Your first step to solving the mystery is to retrieve the corresponding crime scene report from the police department's database. 
+A crime has taken place and the detective needs your help. The detective gave you the crime scene report, but you somehow lost it. You vaguely remember that the crime was a murder that occurred sometime on January 15, 2018 and that it took place in SQL City. All the clues to this mystery are buried in a huge database, and you need to use R and SAS to navigate through this network of information. Your first step to solving the mystery is to retrieve the corresponding crime scene report from the police department's database. 
 
 This database schema may help you figure out how to navigate the database:
 
