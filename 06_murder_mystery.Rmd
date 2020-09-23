@@ -1,11 +1,11 @@
 ---
 title: "Homework: Murder in SQL City"
-author: "Firstname Lastname"
+author: "Key"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F, cache = T)
 options(digits = 3)
 ```
 
@@ -18,8 +18,8 @@ sasexe <- "C:/Program Files/SASHome/SASFoundation/9.4/sas.exe"
 sasopts <- "-nosplash -ls 75"
 
 # Linux options (for grading, please leave this in!)
-# sasexe <- "/usr/local/SASHome/SASFoundation/9.4/bin/sas_en"
-# sasopts <- "-ls 75"
+sasexe <- "/usr/local/SASHome/SASFoundation/9.4/bin/sas_en"
+sasopts <- "-ls 75"
 ```
 
 
@@ -61,17 +61,225 @@ This database schema may help you figure out how to navigate the database:
 ![sql-murder-mystery database schema diagram](https://github.com/NUKnightLab/sql-mysteries/blob/master/schema.png?raw=true)
 
 ## R
-```{r data-setup-r}
+```{r data-setup-r, message = F, warning = F}
 # Your database connection code goes here. Store the connection as con 
 library(RSQLite)
 library(DBI)
-# This is what mine looks like with the DSN setup above
-con <- dbConnect(RSQLite::SQLite(), "sqlmystery")
+# con <- dbConnect(RSQLite::SQLite(), "sql-murder-mystery.db")
+
+# Load all tables from CSV
+source("https://raw.githubusercontent.com/srvanderplas/unl-stat850/master/code/06_sql-murder-setup.R")
+
+library(tidyverse)
 ```
+
+
+First, we probably need to retrieve the police report:
+```{r}
+case <- filter(crime_scene_report, date == 20180115, type == "murder", city == "SQL City")
+
+case$description
+```
+
+We can follow these leads by looking in the person database:
+```{r}
+head(person)
+
+witness1 <- filter(person, address_street_name == "Northwestern Dr") %>%
+  # assume "last house" = highest number
+  filter(address_number == max(address_number))
+
+witness2 <- filter(person, address_street_name == "Franklin Ave",
+                   str_detect(name, "Annabel"))
+
+witnesses <- bind_rows(witness1, witness2)
+```
+
+Then, we can query the interview database for interviews with these witnesses:
+```{r}
+# Get all interviews with a person id that is in the witnesses table id column
+statements <- semi_join(interview, witnesses, by = c("person_id" = "id"))
+
+statements$transcript
+```
+
+In the first statement, we can see that we might need to query two databases: 
+- `get_fit_now_member` to look for membership numbers starting with 48Z, and who are gold members
+- `drivers_license` to look for license plates which include H42W
+
+In the second statement, we would want to look at get_fit_now_check_in for a check in on January 9th. If there are multiple check-ins, we could also check to see what time they were there and find those who were present at the same time as the witness.
+
+```{r}
+# Statement 1 info:
+suspect_1_gym <- get_fit_now_member %>%
+  filter(str_detect(id, "48Z"), membership_status == "gold")
+
+suspect_1_lic <- drivers_license %>%
+  filter(str_detect(plate_number, "H42W")) %>%
+  # Get the suspects names
+  left_join(person, by = c("id" = "license_id"))
+
+# Combine the information
+suspect1 <- inner_join(suspect_1_gym, suspect_1_lic, by = "name")
+suspect1
+```
+
+Does the 2nd statement corroborate the first?
+```{r}
+# statement 2 info
+suspect2_gym_checkin <- get_fit_now_check_in %>%
+  filter(check_in_date == 20180109)
+suspect2_gym_checkin
+```
+
+But we have additional information: we know the witness was there at the same time:
+```{r}
+witness2_gym_info <- inner_join(get_fit_now_member, witness2, by = c("name", "person_id" = "id"))
+# witness was there at the same time
+witness2_gym_checkin <- inner_join(suspect2_gym_checkin, witness2_gym_info, by = c("membership_id" = "id"))
+
+suspect2_gym_checkin <- filter(suspect2_gym_checkin, check_in_time < witness2_gym_checkin$check_out_time &
+                                 check_out_time > witness2_gym_checkin$check_in_time) %>%
+  # rule out the witness
+  anti_join(witness2_gym_checkin) %>%
+  # get names
+  left_join(get_fit_now_member, by = c("membership_id" = "id"))
+
+suspect2_gym_checkin
+```
+
+At this point, we can be pretty comfortable saying that Jeremy Bowers looks guilty. Is there an interview?
+
+```{r}
+bowers_interview <- interview %>%
+  inner_join(suspect2_gym_checkin)
+bowers_interview$transcript
+```
+
+According to the statement we're not done. 
+
+```{r}
+hired_the_killer <- drivers_license %>%
+  # woman's description
+  filter(between(height, 65, 67), hair_color == "red", car_make == "Tesla", car_model == "Model S") %>%
+  left_join(person, by = c("id" = "license_id")) %>%
+  rename(license_id = id, person_id = id.y) %>%
+  inner_join(
+    facebook_event_checkin %>%
+      filter(between(date, 20171201,20171231), str_detect(event_name, "Symphony")) %>%
+      count(person_id) %>%
+      filter(n == 3)
+  )
+
+inner_join(hired_the_killer, income) %>%
+  select(name, annual_income)
+```
+
+The killer was Jeremy Bowers, but he was hired by Miranda Priestly. 
 
 ## SAS
 
 ```{r, engine="sashtml", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
 /* This is what my connection information looks like in SAS with the DSN set up */
 libname murder odbc complete = "dsn=sqlmystery";
+
+PROC PRINT data = murder.person(obs=10);RUN;
 ```
+
+```{r, engine = "sashtml", engine.path = sasexe, engine.opts = sasopts, collectcode = T, error = T, include = F}
+/* This code reads in the 8 tables needed for the SQL murder mystery */
+
+filename file1 URL 'https://raw.githubusercontent.com/srvanderplas/unl-stat850/master/data/sql-murder/crime_scene_report.csv';
+PROC IMPORT FILE = file1 OUT = crime_scene_report DBMS = CSV REPLACE;
+GETNAMES=YES;
+GUESSINGROWS=1228;
+RUN;
+filename file2 URL 'https://raw.githubusercontent.com/srvanderplas/unl-stat850/master/data/sql-murder/drivers_license.csv';
+PROC IMPORT FILE = file2 OUT = drivers_license DBMS = CSV REPLACE;
+GETNAMES=YES;
+GUESSINGROWS=10007;
+RUN;
+filename file3 URL 'https://raw.githubusercontent.com/srvanderplas/unl-stat850/master/data/sql-murder/facebook_event_checkin.csv';
+PROC IMPORT FILE = file3 OUT = facebook_event_checkin DBMS = CSV REPLACE;
+GETNAMES=YES;
+GUESSINGROWS=20011;
+RUN;
+filename file4 URL 'https://raw.githubusercontent.com/srvanderplas/unl-stat850/master/data/sql-murder/get_fit_now_check_in.csv';
+PROC IMPORT FILE = file4 OUT = get_fit_now_check_in DBMS = CSV REPLACE;
+GETNAMES=YES;
+GUESSINGROWS=2703;
+RUN;
+filename file5 URL 'https://raw.githubusercontent.com/srvanderplas/unl-stat850/master/data/sql-murder/get_fit_now_member.csv';
+PROC IMPORT FILE = file5 OUT = get_fit_now_member DBMS = CSV REPLACE;
+GETNAMES=YES;
+GUESSINGROWS=184;
+RUN;
+filename file6 URL 'https://raw.githubusercontent.com/srvanderplas/unl-stat850/master/data/sql-murder/income.csv';
+PROC IMPORT FILE = file6 OUT = income DBMS = CSV REPLACE;
+GETNAMES=YES;
+GUESSINGROWS=7514;
+RUN;
+filename file7 URL 'https://raw.githubusercontent.com/srvanderplas/unl-stat850/master/data/sql-murder/interview.csv';
+PROC IMPORT FILE = file7 OUT = interview DBMS = CSV REPLACE;
+GETNAMES=YES;
+GUESSINGROWS=4991;
+RUN;
+filename file8 URL 'https://raw.githubusercontent.com/srvanderplas/unl-stat850/master/data/sql-murder/person.csv';
+PROC IMPORT FILE = file8 OUT = person DBMS = CSV REPLACE;
+GETNAMES=YES;
+GUESSINGROWS=10011;
+RUN;
+```
+
+First, we get the description of the crime:
+```{r, engine = "sashtml", engine.path = sasexe, engine.opts = sasopts, collectcode = T, error = T}
+PROC PRINT DATA=crime_scene_report (WHERE= (date = 20180115 AND city = "SQL City" AND type = "murder")); RUN;
+```
+
+Next, we locate the witnesses:
+```{r, engine = "sashtml", engine.path = sasexe, engine.opts = sasopts, collectcode = T, error = T}
+PROC SQL;
+CREATE TABLE witnesses AS
+SELECT * FROM person
+WHERE (address_street_name = "Northwestern Dr")
+GROUP BY address_street_name 
+HAVING address_number = max(address_number) ;
+/* add info from witness 2 */
+INSERT INTO witnesses
+SELECT * FROM PERSON WHERE (address_street_name = "Franklin Ave")
+HAVING name CONTAINS "Annabel";
+
+PROC PRINT data = witnesses; RUN;
+```
+
+And we cross reference the statements...
+```{r, engine = "sashtml", engine.path = sasexe, engine.opts = sasopts, collectcode = T, error = T}
+PROC SQL;
+CREATE TABLE witness_statements AS
+SELECT coalesce(t1.id, t2.person_id) AS person_id, transcript
+  FROM witnesses t1 
+INNER JOIN interview t2 on (t1.id = t2.person_id);
+
+PROC PRINT data = witness_statements; RUN;
+```
+
+Now we can get a list of people who meet the criteria in the statements:
+```{r, engine = "sashtml", engine.path = sasexe, engine.opts = sasopts, collectcode = T, error = T}
+PROC SQL;
+CREATE TABLE tmp1 AS
+SELECT * FROM get_fit_now_member
+  WHERE membership_status="gold" AND id CONTAINS "48Z";
+CREATE TABLE tmp2 AS 
+SELECT * FROM drivers_license WHERE plate_number CONTAINS "H42W";
+
+CREATE table suspect1 AS
+SELECT * FROM tmp1 t1 
+INNER JOIN 
+tmp2 t2
+ON (t1.person_id = t2.id);
+on t1.person_id = t2.id;
+PROC PRINT data=suspect1;RUN;
+
+PROC CONTENTS get_fit_now_member
+```
+
