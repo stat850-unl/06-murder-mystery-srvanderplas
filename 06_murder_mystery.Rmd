@@ -11,13 +11,17 @@ options(digits = 3)
 
 ```{r load-sas-libraries, echo = F, message = F, warning = F}
 
-saspath <- "/usr/local/SASHome/SASFoundation/9.4/bin/sas_en" # Your SAS path goes here
-sasopts <- "-ls 75"
-knitr::opts_chunk$set(engine.path=list(sas=saspath, saslog=saspath, sashtml=saspath),
-                      engine.opts=list(sas=sasopts, saslog=sasopts, sashtml=sasopts), 
-                      comment=NA)
 library(SASmarkdown)
+sas_enginesetup(sashtml=sashtml)
+
+sasexe <- "C:/Program Files/SASHome/SASFoundation/9.4/sas.exe"
+sasopts <- "-nosplash -ls 75"
+
+# Linux options (for grading, please leave this in!)
+# sasexe <- "/usr/local/SASHome/SASFoundation/9.4/bin/sas_en"
+# sasopts <- "-ls 75"
 ```
+
 
 ## Instructions
 Northwestern University's Knight lab created a SQL murder mystery to help users sharpen their database skills by solving the crime that happened at SQL city. There are tables with different pieces of information - social media checkins, people, drivers licenses, crime scene reports, police interviews, and more. 
@@ -67,7 +71,7 @@ con <- dbConnect(RSQLite::SQLite(), "sqlmystery")
 
 ## SAS
 
-```{sashtml data-setup-sas}
+```{r, engine="sashtml", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
 /* This is what my connection information looks like in SAS with the DSN set up */
 libname murder odbc complete = "dsn=sqlmystery";
 ```
