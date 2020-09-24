@@ -244,6 +244,7 @@ SELECT * FROM person
 WHERE (address_street_name = "Northwestern Dr")
 GROUP BY address_street_name 
 HAVING address_number = max(address_number) ;
+
 /* add info from witness 2 */
 INSERT INTO witnesses
 SELECT * FROM PERSON WHERE (address_street_name = "Franklin Ave")
@@ -264,22 +265,100 @@ PROC PRINT data = witness_statements; RUN;
 ```
 
 Now we can get a list of people who meet the criteria in the statements:
+
+Starting with statement 1.
 ```{r, engine = "sashtml", engine.path = sasexe, engine.opts = sasopts, collectcode = T, error = T}
 PROC SQL;
+/* Temporary table 1: matching gym members */
 CREATE TABLE tmp1 AS
 SELECT * FROM get_fit_now_member
   WHERE membership_status="gold" AND id CONTAINS "48Z";
+
+/* Temporary table 2: drivers with matching plates */
 CREATE TABLE tmp2 AS 
-SELECT * FROM drivers_license WHERE plate_number CONTAINS "H42W";
+SELECT id AS license_id FROM drivers_license WHERE plate_number CONTAINS "H42W";
 
-CREATE table suspect1 AS
-SELECT * FROM tmp1 t1 
-INNER JOIN 
-tmp2 t2
-ON (t1.person_id = t2.id);
-on t1.person_id = t2.id;
+/* Temporary table 3: names for matching drivers */
+CREATE TABLE tmp3 AS 
+SELECT coalesce(t1.license_id, t2.license_id) AS license_id, t2.id AS person_id, t2.name FROM tmp2 t1
+LEFT JOIN person t2 ON (t1.license_id = t2.license_id);
+
+/* Suspect1: intersection of temp table 1 and tmp table 3 */
+CREATE TABLE suspect1 AS 
+SELECT coalesce(t1.name, t2.name) AS name, 
+       coalesce(t1.person_id, t2.person_id) AS person_id, 
+       t1.id AS membership_id, 
+       t2.license_id, 
+       t1.membership_status AS member_status 
+FROM tmp1 t1 INNER JOIN tmp3 t2 ON (t1.name = t2.name AND t1.person_id = t2.person_id);
+
+/* clean up */
+DROP TABLE tmp1, tmp2, tmp3;
+QUIT;
+
 PROC PRINT data=suspect1;RUN;
-
-PROC CONTENTS get_fit_now_member
 ```
 
+We can confirm this with statement 2:
+```{r, engine = "sashtml", engine.path = sasexe, engine.opts = sasopts, collectcode = T, error = T}
+PROC SQL;
+/* Temporary table 1: witness gym info */
+CREATE TABLE witness_gym_member AS
+SELECT coalesce(t3.membership_id, t4.membership_id) AS membership_id, 
+       person_id, name, check_in_date, check_in_time, check_out_time
+FROM 
+( /* this is a subquery to get the witness gym membership info */
+  SELECT coalesce(t1.person_id, t2.id) AS person_id, t1.id AS membership_id, 
+       t2.name, t2.license_id FROM get_fit_now_member t1
+  INNER JOIN witnesses t2 ON (t1.person_id = t2.id)) t3, 
+/* And this table has her check-in info */
+get_fit_now_check_in t4
+WHERE t3.membership_id = t4.membership_id;
+
+
+/* Temporary table 2: People at the gym on the 9th */
+/* Add in extra columns for witness check-in time */
+CREATE TABLE tmp2 AS 
+/* columns in the result */
+SELECT t1.membership_id, t1.check_in_date, t1.check_in_time, t1.check_out_time,
+       t2.check_in_time AS witness_check_in_time, 
+       t2.check_out_time AS witness_check_out_time FROM 
+/* first table in join */
+( SELECT * FROM get_fit_now_check_in 
+  WHERE check_in_date = 20180109) t1, 
+/* second table in join */
+witness_gym_member t2
+/* condition to check after join is completed */
+/* ensure times overlap */
+HAVING check_in_time < witness_check_out_time AND 
+       check_out_time > witness_check_in_time;
+
+
+/* Temporary table 3: names for matching gym members */
+CREATE TABLE suspect2 AS 
+SELECT t3.membership_id, 
+       t3.check_in_date, t3.check_in_time, t3.check_out_time, 
+       t3.person_id, t3.name FROM 
+      /* subtable result 1: people at the gym on the 9th with names and person ids */
+       (SELECT coalesce(t1.membership_id, t2.id) AS membership_id, 
+         t1.check_in_date, t1.check_in_time, t1.check_out_time, 
+         t2.person_id, t2.name
+        FROM tmp2 t1, get_fit_now_member t2
+        WHERE t1.membership_id = t2.id) t3
+      /* subtable 2: witnesses */
+/* proc sql does not have anti join, so do a left join and look for missingness */
+LEFT JOIN witnesses t4 ON (t3.person_id = t4.id)
+WHERE missing(t4.id)
+;
+/* clean up */
+DROP TABLE witness_gym_member,tmp2;
+QUIT;
+
+PROC PRINT data=suspect2;RUN;
+```
+
+Lets get the union of the two suspect lists and see what statements we have from them:
+
+```{r, engine = "sashtml", engine.path = sasexe, engine.opts = sasopts, collectcode = T, error = T}
+
+```
