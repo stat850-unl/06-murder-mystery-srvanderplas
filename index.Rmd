@@ -356,5 +356,75 @@ PROC PRINT data=suspect2;RUN;
 Lets get the union of the two suspect lists and see what statements we have from them:
 
 ```{r, engine = "sashtml", engine.path = sasexe, engine.opts = sasopts, collectcode = T, error = T}
+PROC SQL;
+CREATE TABLE tmp1 AS
+  SELECT coalesce(t1.person_id, t2.person_id) AS person_id, 
+         coalesce(t1.name, t2.name) AS name, 
+         coalesce(t1.membership_id, t2.membership_id) AS membership_id, 
+         t2.check_in_date, t2.check_in_time, t2.check_out_time, t1.license_id, t1.member_status 
+  FROM suspect1 t1 FULL JOIN suspect2 t2 
+  ON (t1.person_id = t2.person_id AND t1.name = t2.name AND t1.membership_id = t2.membership_id);
 
+CREATE TABLE suspects AS
+SELECT * FROM tmp1 t1 LEFT JOIN interview t2 ON t1.person_id = t2.person_id;
+
+DROP TABLE suspect1, suspect2, tmp1;
+
+QUIT;
+
+PROC PRINT data=suspects;RUN;
 ```
+
+So the suspect who was implicated in both witness statements is the only one with a police interview. And that suspect provides some information: 1, he's the killer, but 2, he was for hire. 
+
+In the interest of justice, we have to go through and find the person who hired him.
+
+
+```{r, engine = "sashtml", engine.path = sasexe, engine.opts = sasopts, collectcode = T, error = T}
+PROC SQL;
+/* Physical description of suspect and car */
+CREATE TABLE sub_dl AS
+SELECT coalesce(t1.id, t2.license_id) as license_id, 
+    t1.hair_color, t1.height, t1.car_make, t1.car_model,
+    t2.name, t2.id as person_id, t2.ssn
+  FROM 
+( SELECT * FROM drivers_license 
+  WHERE hair_color = "red" AND 
+      height > 64 AND 
+      height < 68 AND 
+      car_make = "Tesla" AND 
+      car_model = "Model S" ) t1 
+LEFT JOIN person t2 
+ON (t1.id = t2.license_id);
+
+/* Income */
+CREATE TABLE sub_income AS
+SELECT * FROM income t1 
+RIGHT JOIN sub_dl t2 ON t1.ssn = t2.ssn;
+
+/* Facebook checkins */
+CREATE TABLE tmp AS
+SELECT * FROM facebook_event_checkin
+WHERE date > 20171130 AND
+      date < 20180101 AND
+      event_name CONTAINS "SQL Symphony";
+
+CREATE TABLE sub_fb AS
+SELECT COUNT(event_id) AS n, person_id FROM tmp
+GROUP BY person_id
+HAVING n=3;
+
+DROP TABLE tmp;
+
+CREATE TABLE culprit AS
+SELECT name, person_id, annual_income, hair_color, height, car_make, car_model
+FROM (
+  SELECT coalesce(t1.person_id, t2.person_id) AS person_id, name, ssn, 
+  t2.hair_color, t2.height, t2.car_make, t2.car_model
+  FROM sub_fb t1 INNER JOIN sub_dl t2 ON t1.person_id = t2.person_id
+) t3 LEFT JOIN income t4 ON t3.ssn = t4.ssn;
+
+PROC PRINT DATA=culprit;RUN;
+```
+
+So once again, we know that Miranda Priestly hired Jeremy Bowers to commit murder.
