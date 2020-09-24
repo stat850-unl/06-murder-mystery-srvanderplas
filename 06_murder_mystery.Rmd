@@ -62,10 +62,6 @@ This database schema may help you figure out how to navigate the database:
 
 ## R
 ```{r data-setup-r, message = F, warning = F}
-# Your database connection code goes here. Store the connection as con 
-library(RSQLite)
-library(DBI)
-# con <- dbConnect(RSQLite::SQLite(), "sql-murder-mystery.db")
 
 # Load all tables from CSV
 source("https://raw.githubusercontent.com/srvanderplas/unl-stat850/master/code/06_sql-murder-setup.R")
